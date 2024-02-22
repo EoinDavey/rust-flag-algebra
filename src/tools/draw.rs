@@ -124,7 +124,7 @@ fn arrow(i: usize, j: usize, n: usize) -> Polygon {
 }
 
 fn color(c: usize) -> &'static str {
-    ["black", "red", "blue"][c]
+    ["black", "red", "blue", "green"][c]
 }
 
 fn frame() -> SVG {
