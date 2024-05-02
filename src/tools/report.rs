@@ -157,7 +157,7 @@ where
     const LATEX: bool = F::LATEX;
 
     fn print_html<W: Write>(&self, w: &mut W) -> Result<()> {
-        print_tab(w, &self.get(), |i, _| Some(i), self.t.size)
+        print_tab(w, &self.get(), |i, _| Some(i+1), self.t.size)
     }
 }
 
@@ -178,7 +178,7 @@ where
                 if val.is_zero() {
                     None
                 } else {
-                    Some(val / scale.clone())
+                    Some(format!("F_{}: {}", i+1, val / scale.clone()))
                 }
             },
             self.basis.t.size,
@@ -323,6 +323,16 @@ where
     let mut w = BufWriter::new(File::create(&filename)?);
     // Header
     header(&mut w, "Report")?;
+    // Basis
+    writeln!(w, "<h2>Basis:</h2>")?;
+    writeln!(w, "<div class=\"obj\">")?;
+    pb.obj.basis.print_html(&mut w)?;
+    writeln!(w, "</div>")?;
+    // Min Solution
+    writeln!(w, "<h2>Minimal Solution:</h2>")?;
+    writeln!(w, "<div class=\"obj\">")?;
+    print_tab(&mut w, &pb.obj.basis.get(), |i, _| Some(format!("F_{}: {}", i+1, cert.y[i])), pb.obj.basis.t.size)?;
+    writeln!(w, "</div>")?;
     // Objective
     writeln!(w, "<h2>Objective:</h2>")?;
     writeln!(w, "<div class=\"obj\">")?;
@@ -379,6 +389,9 @@ where
         let mat = &cert.x[pb.ineqs.len() + block];
         write_csmatrix(&mut w, mat)?;
         //
+        writeln!(w, "<details><summary>Basis</summary>")?;
+        cs.1.split.left_basis().print_html(&mut w)?;
+        writeln!(w, "</details>")?;
         writeln!(w, "<details><summary>Eigenvalue decomposition</summary>")?;
         let a: Array2<f64> = mat.to_dense();
         let (eigenvalues, eigenvectors) = a.eigh(UPLO::Lower).unwrap();

@@ -595,7 +595,7 @@ impl Selector {
         let mut simple = ArrayVec::new();
         simple.push(Simple); //FIXME
                              //simple.push(Invariant);
-        (Self {
+        Self {
             ineqs: prob
                 .ineqs
                 .iter()
@@ -603,8 +603,8 @@ impl Selector {
                 .collect(),
             cs: vec![simple; prob.cs.len()],
             cs_subspace: prob.cs.iter().map(Subspace::new).collect(), // Can be expensive
-        })
-        .variant_reduced(prob) // FIXME
+        }
+        //.variant_reduced(prob) // FIXME
     }
     pub fn variant_reduced<N, F>(mut self, problem: &Problem<N, F>) -> Self
     where
