@@ -171,9 +171,9 @@ def sumup(meta, obj, linear_ineqs, cs_ineqs, linear_coefs, cs_coefs):
     for (mat, i) in cs_ineq:
       sm[i - 1] += (cs_coefs[idx] * mat).sum()
 
-  print(abs(sm -np.array(obj)).sum())
   print(abs(sm -np.array(obj)).sum() < EPS)
-  print(abs(λ + 120/4)< EPS)
+  print(abs(sm -np.array(obj)).sum())
+  assert(abs(λ + 120/4)< EPS)
 
 def proc_problem():
   parser = build_parser(sys.argv[1])
@@ -182,10 +182,27 @@ def proc_problem():
   c, blcks = read_body(parser, meta, expect_ints=True)
   linear_ineqs, cs_ineqs = proc_body(meta, c, blcks)
 
+  #print_body(meta, c, linear_ineqs, cs_ineqs, None)
+
   assert(len(sys.argv) >= 3)
   cert_parser = build_parser(sys.argv[2])
   _, cert_blcks = read_body(cert_parser, Meta(2, meta.n_blocks, meta.block_struct))
   linear_coefs, cs_coefs = proc_cert(meta, cert_blcks)
+
+  linear_ineqs = [
+    linear_ineqs[59],
+    linear_ineqs[60],
+    linear_ineqs[61],
+    linear_ineqs[62],
+    linear_ineqs[63],
+    linear_ineqs[70]]
+
+  # collapsed middle eqns
+  eqn8 = ([(1, 37), (2, 55), (-2, 16), (-1, 17)], 0)
+  eqn12 = ([(-2, 40), (-2, 55), (2, 18)], 0)
+
+  linear_ineqs.append(eqn8)
+  linear_ineqs.append(eqn12)
 
   # Clean and scale objective function
   c = [0]*meta.m
@@ -193,55 +210,56 @@ def proc_problem():
   c[36] = -1
   c[54] = -2
 
-  # Scale coefs
-  linear_coefs = [120 * x for x in linear_coefs]
-  cs_coefs = [120 * x for x in cs_coefs]
-
-
   # Clear coefs
-  linear_coefs = [0]*len(linear_coefs)
+  linear_coefs = [0]*len(linear_ineqs)
+  cs_coefs = [0]*2
 
   # Adjust equality
-  linear_coefs[58] = 0
-  linear_coefs[59] = 6
-  linear_coefs[60] = 1
-  linear_coefs[61] = 0.25
-  # 62 TBD
-  linear_coefs[62] = 10.439937957271473
+  linear_coefs[0] = 6
+  linear_coefs[1] = 1
+  linear_coefs[2] = 0.25
+  linear_coefs[3] = 2
+  linear_coefs[4] = 1
+  linear_coefs[5] = 1
+  linear_coefs[6] = 2
+  linear_coefs[7] = 2
 
-  linear_coefs[63] = 1
+  va1 = np.array([0, 0, -2, 1/2, 1/2, 1])
+  va1 /= sqrt(11/2)
+  la1 = 11/8
+  va2 = np.array([0, 0, 0, -1.0, 1, 0])
+  va2 /= sqrt(2)
+  la2 = 1/8
+  cs_coefs[0] = la1 * np.outer(va1, va1) + la2 * np.outer(va2, va2)
 
-  # Is this a collapsing sequence?
-  linear_coefs[64] = 2
-  linear_coefs[65] = 2
-  linear_coefs[66] = 2
-  linear_coefs[67] = 2
-  linear_coefs[68] = 2
-  linear_coefs[69] = 2
-  linear_coefs[70] = 1
-  
+  vb1 = np.array([0, 0,  1/2 * (-11 + sqrt(89)), 1, 1/2 * (7-sqrt(89)), 0, 1])
+  vb1 /= sqrt(89 - 9 * sqrt(89))
+  lb1 = 1/4 * (11 + sqrt(89))
+  vb2 = np.array([0, 0, 1/2 * (-11 - sqrt(89)), 1, 1/2 * (7 + sqrt(89)), 0, 1])
+  vb2 /= sqrt(89 + 9 * sqrt(89))
+  lb2 = 1/4 * (11 - sqrt(89))
+  cs_coefs[1] = lb1 * np.outer(vb1, vb1) + lb2 * np.outer(vb2, vb2)
+
   sumup(meta, c, linear_ineqs, cs_ineqs, linear_coefs, cs_coefs)
   print_body(meta, c, linear_ineqs, cs_ineqs, (linear_coefs, cs_coefs))
 
-  eigs = np.linalg.eigh(cs_coefs[1])
-  eigvs = eigs[1]
-  for i in range(eigvs.shape[1]):
-    if abs(eigs[0][i]) > EPS:
-      print(eigs[0][i], eigvs[:, i])
-
-  v1 = np.array([-2.45626370e-10, -1.73937644e-08,  3.86975895e-01, -4.94216229e-01,
-      6.01456812e-01, 1.79596713e-09, -4.94216228e-01])
-  l1 = 5.108494851372146
-  v2 = np.array([ 5.05501465e-09, -3.62182194e-07, -7.74758071e-01, 7.58302167e-02,
-      6.23096691e-01, 3.73419286e-08, 7.58302261e-02])
-  l2 = 3.91504108e-01
-
-  va = sqrt(l1) * v1
-  vb = sqrt(l2) * v2
-  print(va, vb)
-
   with np.printoptions(precision=3, suppress=True):
-    print(l1 * np.outer(v1, v1) + l2 * np.outer(v2, v2) - cs_coefs[1])
-    print(np.outer(va, va) + np.outer(vb, vb) - cs_coefs[1])
+    print(lb1 * np.outer(vb1, vb1))
+    print(lb2 * np.outer(vb2, vb2))
+    print(lb1 * np.outer(vb1, vb1) + lb2 * np.outer(vb2, vb2))
+
+  # sm = np.zeros(meta.m)
+  # for idx in range(8):
+  #   (linear_ineq, bound) = linear_ineqs[idx]
+  #   vec = np.zeros(meta.m)
+  #   for (coef, i) in linear_ineq:
+  #     vec[i - 1] = coef
+  #   sm += linear_coefs[idx] * vec
+  # prs = []
+  # for i in range(meta.m):
+  #   if abs(sm[i]) > EPS:
+  #     prs.append((sm[i], i+1))
+  # print(format_coefs(prs))
+
 
 proc_problem()
