@@ -56,15 +56,17 @@ fn coordinates(i: usize, n: usize) -> (f64, f64) {
         (50., 50.)
     } else {
         let angle = 2. * std::f64::consts::PI * i as f64 / n as f64;
-        (50. + 41. * angle.cos(), 50. + 41. * angle.sin())
+        (50. + 39. * angle.cos(), 50. + 39. * angle.sin())
     }
 }
 
 fn vertex(i: usize, n: usize) -> Circle {
     let (cx, cy) = coordinates(i, n);
     Circle::new()
-        .set("r", 6.)
+        .set("r", 10.)
         .set("stroke", "black")
+        .set("stroke-width", 3.)
+        .set("fill", "white")
         .set("cx", cx)
         .set("cy", cy)
 }
@@ -72,10 +74,8 @@ fn vertex(i: usize, n: usize) -> Circle {
 fn type_marker(i: usize, n: usize) -> Circle {
     let (cx, cy) = coordinates(i, n);
     Circle::new()
-        .set("r", 8.5)
-        .set("stroke", "black")
-        .set("stroke-width", 1.5)
-        .set("fill", "none")
+        .set("r", 6)
+        .set("fill", "black")
         .set("cx", cx)
         .set("cy", cy)
 }
@@ -132,9 +132,9 @@ fn frame() -> SVG {
 }
 
 fn add_vertex<N: Node>(node: &mut N, i: usize, n: usize, col: &'static str, in_type: bool) {
-    node.append(vertex(i, n).set("fill", col));
+    node.append(vertex(i, n).set("stroke", col));
     if in_type {
-        node.append(type_marker(i, n));
+        node.append(type_marker(i, n).set("fill", col));
     }
 }
 

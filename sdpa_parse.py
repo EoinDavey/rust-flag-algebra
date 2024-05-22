@@ -1,56 +1,51 @@
 import sys
-import os
 import numpy as np
 from collections import namedtuple
-from scipy.linalg import block_diag
-from itertools import product
-from math import sqrt
-
-EPS = 1e-6
-
-Parser = namedtuple('Parser', ['peek', 'eat', 'done'])
-S = '₀₁₂₃₄₅₆₇₈₉'
-
-def ss(n):
-  s = [S[ord(c)-ord('0')] for c in str(n)]
-  return ''.join(s)
-
-def build_parser(fname):
-  with open(fname) as file:
-    lines = [line.strip() for line in file.read().split('\n')]
-
-  def done():
-    return len(lines) == 0
-  def peek():
-    return lines[0]
-  def eat():
-    nonlocal lines
-    l = lines[0]
-    lines = lines[1:]
-    return l
-
-  return Parser(peek, eat, done)
 
 if len(sys.argv) <= 1:
-  print('Missing args', file=sys.stderr)
+  print('Usage: sdpa_parse <sdpa_file> [certificate_file]', file=sys.stderr)
   sys.exit(1)
 
+# Small epsilon value, under which we consider a number to be zero.
+EPS = 1e-6
+
+# Small function to convert integers to subscript string.
+def ss(n):
+  S = '₀₁₂₃₄₅₆₇₈₉'
+  return ''.join([S[ord(c)-ord('0')] for c in str(n)])
+
+# Simple parser class to read files
+class Parser:
+  def __init__(self, fname):
+    with open(fname) as file:
+      lines = [line.strip() for line in file.read().split('\n')]
+    self.lines = lines
+
+  def done(self):
+    return len(self.lines) == 0
+  def peek(self):
+    return self.lines[0]
+  def eat(self):
+    l = self.lines[0]
+    self.lines = self.lines[1:]
+    return l
+
+# Object to store metadata
 Meta = namedtuple('Meta', ['m', 'n_blocks', 'block_struct'])
 
+# Read metadata from SDPA-Sparse file
 def read_meta(parser):
-  peek, eat, done = parser
+  while parser.peek().startswith('*') or parser.peek().startswith('"'):
+    parser.eat()
 
-  while peek().startswith('*') or peek().startswith('"'):
-    eat()
-
-  m = int(eat())
-  n_blocks = int(eat())
-  block_struct = [int(x) for x in eat().split()]
+  m = int(parser.eat())
+  n_blocks = int(parser.eat())
+  block_struct = [int(x) for x in parser.eat().split()]
 
   return Meta(m, n_blocks, block_struct)
 
+# Read main body of an SDPA-Sparse file
 def read_body(parser, meta, expect_ints=False):
-
   c = [float(x) for x in parser.eat().split()]
 
   fblks = []
@@ -74,11 +69,13 @@ def read_body(parser, meta, expect_ints=False):
 
   return c, fblks
 
+# proc_body takes the raw blocks from an SDPA-Parse file and converts
+# them to a format which represents the underlying inequalities.
 def proc_body(meta, c, blcks):
   linear_ineqs = []
   cs_ineqs = []
   for bid in range(meta.n_blocks): # Constraint bid
-    linear = meta.block_struct[bid] < 0
+    linear = meta.block_struct[bid] < 0 # SDPA-Parse format trickery, negative if diagonal.
     if linear:
       for s in range(abs(meta.block_struct[bid])):
         coef_pairs = []
@@ -90,18 +87,20 @@ def proc_body(meta, c, blcks):
 
         bound = blcks[0][bid][s, s]
         linear_ineqs.append((coef_pairs, bound))
-      continue
-
-    coef_pairs = []
-    for i in range(1, meta.m+1):
-      if not np.any(blcks[i][bid]):
-        continue
-      coef_pairs.append((blcks[i][bid], i))
-    bound = blcks[0][bid]
-    assert(not np.any(bound))
-    cs_ineqs.append(coef_pairs)
+    else:
+      coef_pairs = []
+      for i in range(1, meta.m+1):
+        if not np.any(blcks[i][bid]):
+          continue
+        coef_pairs.append((blcks[i][bid], i))
+      bound = blcks[0][bid]
+      assert(not np.any(bound)) # We assume CS ineqs are all >=0 ineqs
+      cs_ineqs.append(coef_pairs)
   return linear_ineqs, cs_ineqs
 
+# proc_cert converts the raw blocks of a certificate into coefficients for
+# our inequalities. We only need the dual solution so most of the certificate is
+# ignored.
 def proc_cert(meta, cert_blcks):
   linear_coefs = []
   cs_coefs = []
@@ -115,6 +114,7 @@ def proc_cert(meta, cert_blcks):
     cs_coefs.append(cert_blcks[2][bid])
   return linear_coefs, cs_coefs
 
+# Print a vector nicely
 def format_coefs(coef_pairs):
   o = ""
   for i, (c, idx) in enumerate(coef_pairs):
@@ -126,12 +126,15 @@ def format_coefs(coef_pairs):
     o += f'F{ss(idx)}' if abs(c-1) < EPS else f'{c}F{ss(idx)}'
   return o
 
-def print_body(meta, c, linear_ineqs, cs_ineqs, cert_coefs):
+# Take a processed SDPA-Parse file, and optionally a certificate, and print
+# nicely.
+def print_body(meta, c, linear_ineqs, cs_ineqs, cert_coefs=None):
   print('Objective: Minimise ', end='')
   s = [f'{v:.6f}F{ss(i+1)}' for i, v in enumerate(c) if abs(v) > EPS]
   print(' + '.join(s))
 
   for cid, (coef_pairs, bound) in enumerate(linear_ineqs):
+    # If we have the corresponding coefficient, print it and skip if its zero.
     if cert_coefs != None:
       coef = cert_coefs[0][cid]
       if abs(coef) < EPS:
@@ -142,7 +145,6 @@ def print_body(meta, c, linear_ineqs, cs_ineqs, cert_coefs):
     print(format_coefs(coef_pairs), end='')
     print(f' >= {bound}')
 
-
   for idx, coef_pairs in enumerate(cs_ineqs):
     print(f'CS constraint {idx}')
     if cert_coefs != None:
@@ -151,115 +153,48 @@ def print_body(meta, c, linear_ineqs, cs_ineqs, cert_coefs):
         print('λ', coef)
     shape = coef_pairs[0][0].shape
     assert(shape[0] == shape[1])
+    # Collect coefficient matrices and print in a table.
     for rw in range(shape[0]):
       for col in range(shape[0]):
         pairs = [(mat[rw, col], i) for (mat, i) in coef_pairs if abs(mat[rw, col])> EPS]
         print(f'{format_coefs(pairs):^15}',end='')
       print()
 
-def sumup(meta, obj, linear_ineqs, cs_ineqs, linear_coefs, cs_coefs):
+# Take a set of inequalities and their coefficients and compute
+# the corresponding bound for the objective function.
+def sumup(meta, obj, linear_ineqs, cs_ineqs, cert_coefs):
+  linear_coefs, cs_coefs = cert_coefs
   sm = np.zeros(meta.m)
-  λ = 0
+  total_coef = 0
   for idx, (linear_ineq, bound) in enumerate(linear_ineqs):
     vec = np.zeros(meta.m)
     for (coef, i) in linear_ineq:
       vec[i - 1] = coef
     sm += linear_coefs[idx] * vec
-    λ += linear_coefs[idx] * bound
+    total_coef += linear_coefs[idx] * bound
 
   for idx, cs_ineq in enumerate(cs_ineqs):
     for (mat, i) in cs_ineq:
       sm[i - 1] += (cs_coefs[idx] * mat).sum()
 
-  print(abs(sm -np.array(obj)).sum() < EPS)
-  print(abs(sm -np.array(obj)).sum())
-  assert(abs(λ + 120/4)< EPS)
+  assert(abs(sm -np.array(obj)).sum() < EPS)
+  return total_coef
 
 def proc_problem():
-  parser = build_parser(sys.argv[1])
+  parser = Parser(sys.argv[1])
 
   meta = read_meta(parser)
   c, blcks = read_body(parser, meta, expect_ints=True)
   linear_ineqs, cs_ineqs = proc_body(meta, c, blcks)
 
-  #print_body(meta, c, linear_ineqs, cs_ineqs, None)
+  if len(sys.argv) >= 3:
+    cert_parser = Parser(sys.argv[2])
+    _, cert_blcks = read_body(cert_parser, Meta(2, meta.n_blocks, meta.block_struct))
+    cert_coefs = proc_cert(meta, cert_blcks)
+    print_body(meta, c, linear_ineqs, cs_ineqs, cert_coefs)
 
-  assert(len(sys.argv) >= 3)
-  cert_parser = build_parser(sys.argv[2])
-  _, cert_blcks = read_body(cert_parser, Meta(2, meta.n_blocks, meta.block_struct))
-  linear_coefs, cs_coefs = proc_cert(meta, cert_blcks)
-
-  linear_ineqs = [
-    linear_ineqs[59],
-    linear_ineqs[60],
-    linear_ineqs[61],
-    linear_ineqs[62],
-    linear_ineqs[63],
-    linear_ineqs[70]]
-
-  # collapsed middle eqns
-  eqn8 = ([(1, 37), (2, 55), (-2, 16), (-1, 17)], 0)
-  eqn12 = ([(-2, 40), (-2, 55), (2, 18)], 0)
-
-  linear_ineqs.append(eqn8)
-  linear_ineqs.append(eqn12)
-
-  # Clean and scale objective function
-  c = [0]*meta.m
-  c[8] = -2
-  c[36] = -1
-  c[54] = -2
-
-  # Clear coefs
-  linear_coefs = [0]*len(linear_ineqs)
-  cs_coefs = [0]*2
-
-  # Adjust equality
-  linear_coefs[0] = 6
-  linear_coefs[1] = 1
-  linear_coefs[2] = 0.25
-  linear_coefs[3] = 2
-  linear_coefs[4] = 1
-  linear_coefs[5] = 1
-  linear_coefs[6] = 2
-  linear_coefs[7] = 2
-
-  va1 = np.array([0, 0, -2, 1/2, 1/2, 1])
-  va1 /= sqrt(11/2)
-  la1 = 11/8
-  va2 = np.array([0, 0, 0, -1.0, 1, 0])
-  va2 /= sqrt(2)
-  la2 = 1/8
-  cs_coefs[0] = la1 * np.outer(va1, va1) + la2 * np.outer(va2, va2)
-
-  vb1 = np.array([0, 0,  1/2 * (-11 + sqrt(89)), 1, 1/2 * (7-sqrt(89)), 0, 1])
-  vb1 /= sqrt(89 - 9 * sqrt(89))
-  lb1 = 1/4 * (11 + sqrt(89))
-  vb2 = np.array([0, 0, 1/2 * (-11 - sqrt(89)), 1, 1/2 * (7 + sqrt(89)), 0, 1])
-  vb2 /= sqrt(89 + 9 * sqrt(89))
-  lb2 = 1/4 * (11 - sqrt(89))
-  cs_coefs[1] = lb1 * np.outer(vb1, vb1) + lb2 * np.outer(vb2, vb2)
-
-  sumup(meta, c, linear_ineqs, cs_ineqs, linear_coefs, cs_coefs)
-  print_body(meta, c, linear_ineqs, cs_ineqs, (linear_coefs, cs_coefs))
-
-  with np.printoptions(precision=3, suppress=True):
-    print(lb1 * np.outer(vb1, vb1))
-    print(lb2 * np.outer(vb2, vb2))
-    print(lb1 * np.outer(vb1, vb1) + lb2 * np.outer(vb2, vb2))
-
-  # sm = np.zeros(meta.m)
-  # for idx in range(8):
-  #   (linear_ineq, bound) = linear_ineqs[idx]
-  #   vec = np.zeros(meta.m)
-  #   for (coef, i) in linear_ineq:
-  #     vec[i - 1] = coef
-  #   sm += linear_coefs[idx] * vec
-  # prs = []
-  # for i in range(meta.m):
-  #   if abs(sm[i]) > EPS:
-  #     prs.append((sm[i], i+1))
-  # print(format_coefs(prs))
-
+    print('Value:', sumup(meta, c, linear_ineqs, cs_ineqs, cert_coefs))
+  else:
+    print_body(meta, c, linear_ineqs, cs_ineqs, None)
 
 proc_problem()
