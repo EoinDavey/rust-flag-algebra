@@ -313,6 +313,8 @@ pub fn print_report<N, F>(
     pb: &ProblemView<N, F>,
     cert: &Certificate<f64>,
     filename: &str,
+    output_basis: bool,
+    output_primary_solution: bool,
 ) -> Result<()>
 where
     F: Flag + Draw,
@@ -323,16 +325,20 @@ where
     let mut w = BufWriter::new(File::create(&filename)?);
     // Header
     header(&mut w, "Report")?;
-    // Basis
-    writeln!(w, "<h2>Basis:</h2>")?;
-    writeln!(w, "<div class=\"obj\">")?;
-    pb.obj.basis.print_html(&mut w)?;
-    writeln!(w, "</div>")?;
-    // Min Solution
-    writeln!(w, "<h2>Minimal Solution:</h2>")?;
-    writeln!(w, "<div class=\"obj\">")?;
-    print_tab(&mut w, &pb.obj.basis.get(), |i, _| Some(format!("F_{}: {}", i+1, cert.y[i])), pb.obj.basis.t.size)?;
-    writeln!(w, "</div>")?;
+    if output_basis {
+        // Basis
+        writeln!(w, "<h2>Basis:</h2>")?;
+        writeln!(w, "<div class=\"obj\">")?;
+        pb.obj.basis.print_html(&mut w)?;
+        writeln!(w, "</div>")?;
+    }
+    if output_primary_solution {
+        // Primary Solution
+        writeln!(w, "<h2>Primary Solution:</h2>")?;
+        writeln!(w, "<div class=\"obj\">")?;
+        print_tab(&mut w, &pb.obj.basis.get(), |i, _| Some(format!("F_{}: {}", i+1, cert.y[i])), pb.obj.basis.t.size)?;
+        writeln!(w, "</div>")?;
+    }
     // Objective
     writeln!(w, "<h2>Objective:</h2>")?;
     writeln!(w, "<div class=\"obj\">")?;

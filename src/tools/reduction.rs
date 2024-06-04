@@ -163,9 +163,15 @@ where
     where
         F: Draw,
     {
+        self.print_report_verbose(false, false);
+    }
+    pub fn print_report_verbose(&self, output_basis: bool, output_primary_solution: bool)
+    where
+        F: Draw,
+    {
         assert_eq!(Some(self.select.clone()), self.select_certificate_file);
         let cert = self.load_certificate();
-        print_report(&self.pb.view(&self.select), &cert, "report").unwrap()
+        print_report(&self.pb.view(&self.select), &cert, "report", output_basis, output_primary_solution).unwrap()
     }
     // Strategies
 
@@ -187,7 +193,7 @@ where
         }
         self.cs_elim();
         self.ineqs_elim();
-        self.thin_ineqs_elim();
+        //self.thin_ineqs_elim();
         //self.minimize_certificate();
         self.write_sdpa(self.select.clone());
         let _ = self.run_csdp().unwrap();
