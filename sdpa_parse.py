@@ -1,6 +1,7 @@
 import sys
 import numpy as np
-from collections import namedtuple
+from collections import namedtuple, deque
+from scipy import sparse
 
 if len(sys.argv) <= 1:
   print('Usage: sdpa_parse <sdpa_file> [certificate_file]', file=sys.stderr)
@@ -19,16 +20,14 @@ class Parser:
   def __init__(self, fname):
     with open(fname) as file:
       lines = [line.strip() for line in file.read().split('\n')]
-    self.lines = lines
+    self.lines = deque(lines)
 
   def done(self):
     return len(self.lines) == 0
   def peek(self):
     return self.lines[0]
   def eat(self):
-    l = self.lines[0]
-    self.lines = self.lines[1:]
-    return l
+    return self.lines.popleft()
 
 # Object to store metadata
 Meta = namedtuple('Meta', ['m', 'n_blocks', 'block_struct'])
@@ -48,12 +47,7 @@ def read_meta(parser):
 def read_body(parser, meta, expect_ints=False):
   c = [float(x) for x in parser.eat().split()]
 
-  fblks = []
-  for _ in range(meta.m + 1):
-    blcks = []
-    for s in meta.block_struct:
-      blcks.append(np.zeros((abs(s), abs(s)), dtype=np.int32 if expect_ints else np.float64))
-    fblks.append(blcks)
+  fblks = [[None] * meta.n_blocks for _ in range(meta.m+1)]
 
   while not parser.done():
     ln = parser.eat()
@@ -64,38 +58,51 @@ def read_body(parser, meta, expect_ints=False):
     v = int(v) if expect_ints else float(v)
     if meta.block_struct[b - 1] < 0:
       assert(i == j)
+    if fblks[k][b - 1] == None:
+      fblks[k][b - 1] = sparse.dok_array((abs(meta.block_struct[b-1]), abs(meta.block_struct[b-1])), dtype=np.int32 if expect_ints else np.float64)
     fblks[k][b - 1][i - 1, j - 1] = v
     fblks[k][b - 1][j - 1, i - 1] = v
 
+  for k in range(meta.m + 1):
+    for b in range(meta.n_blocks):
+      if fblks[k][b] != None:
+        fblks[k][b] = fblks[k][b].tocsr()
+
   return c, fblks
 
-# proc_body takes the raw blocks from an SDPA-Parse file and converts
+# proc_body takes the raw blocks from an SDPA-Sparse file and converts
 # them to a format which represents the underlying inequalities.
 def proc_body(meta, c, blcks):
   linear_ineqs = []
+  for bid in range(meta.n_blocks): # Constraint bid
+    linear = meta.block_struct[bid] < 0 # SDPA-Parse format trickery, negative if diagonal.
+    if not linear:
+      continue
+    coef_pairs = [[] for _ in range(abs(meta.block_struct[bid]))]
+    for i in range(1, meta.m+1):
+      if blcks[i][bid] == None:
+        continue
+      rs, _ = blcks[i][bid].nonzero()
+      for r in rs:
+        v = blcks[i][bid][r, r]
+        coef_pairs[r].append((v, i))
+    bounds = np.zeros(abs(meta.block_struct[bid])) if blcks[0][bid] == None else blcks[0][bid].diagonal()
+    linear_ineqs += list(zip(coef_pairs, bounds))
+
   cs_ineqs = []
   for bid in range(meta.n_blocks): # Constraint bid
     linear = meta.block_struct[bid] < 0 # SDPA-Parse format trickery, negative if diagonal.
     if linear:
-      for s in range(abs(meta.block_struct[bid])):
-        coef_pairs = []
-        for i in range(1, meta.m+1):
-          coef = blcks[i][bid][s, s]
-          if abs(coef) < EPS:
-            continue
-          coef_pairs.append((blcks[i][bid][s, s], i))
+      continue
+    coef_pairs = []
+    for i in range(1, meta.m+1):
+      if blcks[i][bid] == None or blcks[i][bid].count_nonzero() == 0:
+        continue
+      coef_pairs.append((blcks[i][bid], i))
+    bound = blcks[0][bid]
+    assert(bound == None or bound.count_nonzero() == 0) # We assume CS ineqs are all >=0 ineqs
+    cs_ineqs.append(coef_pairs)
 
-        bound = blcks[0][bid][s, s]
-        linear_ineqs.append((coef_pairs, bound))
-    else:
-      coef_pairs = []
-      for i in range(1, meta.m+1):
-        if not np.any(blcks[i][bid]):
-          continue
-        coef_pairs.append((blcks[i][bid], i))
-      bound = blcks[0][bid]
-      assert(not np.any(bound)) # We assume CS ineqs are all >=0 ineqs
-      cs_ineqs.append(coef_pairs)
   return linear_ineqs, cs_ineqs
 
 # proc_cert converts the raw blocks of a certificate into coefficients for
@@ -150,7 +157,7 @@ def print_body(meta, c, linear_ineqs, cs_ineqs, cert_coefs=None):
     if cert_coefs != None:
       coef = cert_coefs[1][idx]
       with np.printoptions(precision=3, suppress=True):
-        print('λ', coef)
+        print('λ', coef.todense())
     shape = coef_pairs[0][0].shape
     assert(shape[0] == shape[1])
     # Collect coefficient matrices and print in a table.
@@ -184,15 +191,17 @@ def proc_problem():
   parser = Parser(sys.argv[1])
 
   meta = read_meta(parser)
-  c, blcks = read_body(parser, meta, expect_ints=True)
+  c, blcks = read_body(parser, meta, expect_ints=False)
+  print('Read Body')
   linear_ineqs, cs_ineqs = proc_body(meta, c, blcks)
+  print('Processed Body')
 
   if len(sys.argv) >= 3:
     cert_parser = Parser(sys.argv[2])
     _, cert_blcks = read_body(cert_parser, Meta(2, meta.n_blocks, meta.block_struct))
     cert_coefs = proc_cert(meta, cert_blcks)
-    print_body(meta, c, linear_ineqs, cs_ineqs, cert_coefs)
 
+    print_body(meta, c, linear_ineqs, cs_ineqs, cert_coefs)
     print('Value:', sumup(meta, c, linear_ineqs, cs_ineqs, cert_coefs))
   else:
     print_body(meta, c, linear_ineqs, cs_ineqs, None)
