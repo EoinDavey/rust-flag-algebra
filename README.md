@@ -1,5 +1,9 @@
 # flag-algebra
 
+> [!important]
+> This is a fork of the original repository modified for use in TODO LINK.
+> This is not the source code of the library as published on crates.io
+
 A generic implementation of
 [flag algebras](http://people.cs.uchicago.edu/~razborov/files/flag.pdf).
 
